@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import fr.benoitparmentier.msb.model.service.PlayerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -22,11 +23,14 @@ import fr.benoitparmentier.msb.model.entity.Player;
 import fr.benoitparmentier.msb.model.entity.dto.ContestDTO;
 import fr.benoitparmentier.msb.model.service.ContestService;
 
-
-@CrossOrigin  // permet d'éviter les erreurs CORS
+@CrossOrigin
 @RestController
 public class ContestController {
-    @Autowired ContestService contestService;
+    @Autowired
+    private ContestService contestService;
+
+    @Autowired
+    private PlayerService playerService;
 
     @GetMapping("/contests")
     public List<ContestDTO> list() {
@@ -38,14 +42,6 @@ public class ContestController {
         return new ContestDTO(contestService.select(id));
     }
 
-    // public ContestDTO contest(@RequestBody Contest contest) {
-    //     return contestService.save(contest);
-    // }
-
-    /**
-     * ? EXERCICE : Ecrire la méthode qui récupère les valeurs
-     * ? d'un formulaire pour enregistrer une nouvelle partie (Contest)
-     */
     @PostMapping("/contest")
     public ContestDTO add(@RequestParam("start_date") Date startDate,
                           @RequestParam("game_id") Game game,
@@ -75,5 +71,79 @@ public class ContestController {
             return new ContestDTO(contestService.save(contest));
         }
         return null;
+    }
+
+    // --- EXERCICES ---
+    //? 1. Possibilité d'ajouter un joueur à une partie existante
+    //? 2. Possibilité d'ajouter plusieurs joueurs d'un coup à une partie existante
+    //? 3. Possibilité de supprimer un joueur d'une partie
+    //? 4. Possibilité de choisir le vainqueur d'une partie parmi les participants. Une fois que le vainqueur a été choisi, il ne peut plus être modifié.
+    //* 6. [Bonus] les modifications précédentes ne peuvent se faire que si la partie n'a pas encore eu lieu.
+    //* Après, aucune modification n'est possible sauf pour désigner le vainqueur qui ne peut être désigné
+    //* que si la partie a déjà eu lieu (le jour même ou après).
+
+    @PostMapping("/contest/{id}/players")
+    public ContestDTO addPlayersToContest(@PathVariable int id, @RequestBody List<Integer> playersIds) {
+        Contest contest = contestService.select(id);
+
+        if (contest.getStartDate().before(new Date(System.currentTimeMillis()))) {
+            return null;
+        }
+
+        List<Player> playerList = contest.getPlayers();
+        List<Player> playersToAdd = playersIds.stream()
+                .map(playerId -> playerService.select(playerId))
+                .filter(player -> player != null && !playerList.contains(player))
+                .toList();
+        playerList.addAll(playersToAdd);
+        contest.setPlayers(playerList);
+
+        return new ContestDTO(contestService.save(contest));
+    }
+
+    @PostMapping("/contest/{contestId}/player/{player}")
+    public ContestDTO addPlayerToContest(@PathVariable int contestId, @PathVariable Player player) {
+        Contest contest = contestService.select(contestId);
+
+        if (player != null && !contest.getPlayers().contains(player) && !contest.getStartDate().before(new Date(System.currentTimeMillis()))) {
+            List<Player> playerList = contest.getPlayers();
+            playerList.add(player);
+            contest.setPlayers(playerList);
+
+            return new ContestDTO(contestService.save(contest));
+        }
+        return null;
+    }
+
+    @PutMapping("/contest/{contestId}/winner/{winnerId}")
+    public ContestDTO defineWinner(@PathVariable int contestId, @PathVariable int winnerId) {
+        Contest contest = contestService.select(contestId);
+        if(contest.getWinner() != null || new Date(System.currentTimeMillis()).before(contest.getStartDate())) return null;
+
+        Player winner = playerService.select(winnerId);
+        if (!contest.getPlayers().contains(winner)) return null;
+
+        contest.setWinner(winner);
+
+        return new ContestDTO(contestService.save(contest));
+    }
+
+    @DeleteMapping("/contest/{contestId}/player/{playerId}")
+    public boolean deletePlayerToContest(@PathVariable int contestId, @PathVariable int playerId) {
+        Contest contest = contestService.select(contestId);
+
+        if (contest.getStartDate().before(new Date(System.currentTimeMillis()))) {
+            return false;
+        }
+
+        List<Player> contestPlayers = contest.getPlayers();
+        contest.setPlayers(
+                contestPlayers
+                        .stream()
+                        .filter(player -> player.getId() != playerId)
+                        .collect(Collectors.toList())
+        );
+        contestService.save(contest);
+        return true;
     }
 }
